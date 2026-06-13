@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: kan-volatility-trading
+Version: 0.1.0
+Summary: KAN-based realized volatility forecasting and paper-traded risk strategy.
+Requires-Python: >=3.10
