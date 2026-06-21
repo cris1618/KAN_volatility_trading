@@ -8,3 +8,4 @@ jupyter
 ipykernel
 tqdm
 torch
+git+https://github.com/Blealtan/efficient-kan.git
