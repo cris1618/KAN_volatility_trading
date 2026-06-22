@@ -4,20 +4,26 @@ import matplotlib.pyplot as plt
 
 from kan_volatility.config import FIGURES_DIR, TABLES_DIR
 
+
 BASELINE_SUMMARY_FILE = "baseline_model_summary.csv"
 BASELINE_PREDICTIONS_FILE = "baseline_test_predictions.csv"
 
 MLP_SUMMARY_FILE = "mlp_model_summary.csv"
 MLP_PREDICTIONS_FILE = "mlp_test_predictions.csv"
 
+KAN_SUMMARY_FILE = "kan_model_summary.csv"
+KAN_PREDICTIONS_FILE = "kan_test_predictions.csv"
+
+
 def load_required_csv(path):
     if not path.exists():
         raise FileNotFoundError(
-            f" Could not find {path}."
-            "Make sure you have already run the baseline and MLP scripts."
+            f"Could not find {path}. "
+            "Make sure you have already run the baseline, MLP, and KAN scripts."
         )
-    
+
     return pd.read_csv(path)
+
 
 def load_all_results():
     baseline_summary = load_required_csv(TABLES_DIR / BASELINE_SUMMARY_FILE)
@@ -26,13 +32,16 @@ def load_all_results():
     mlp_summary = load_required_csv(TABLES_DIR / MLP_SUMMARY_FILE)
     mlp_predictions = load_required_csv(TABLES_DIR / MLP_PREDICTIONS_FILE)
 
+    kan_summary = load_required_csv(TABLES_DIR / KAN_SUMMARY_FILE)
+    kan_predictions = load_required_csv(TABLES_DIR / KAN_PREDICTIONS_FILE)
+
     summary = pd.concat(
-        [baseline_summary, mlp_summary],
+        [baseline_summary, mlp_summary, kan_summary],
         ignore_index=True,
     )
 
     predictions = pd.concat(
-        [baseline_predictions, mlp_predictions],
+        [baseline_predictions, mlp_predictions, kan_predictions],
         ignore_index=True,
     )
 
@@ -40,16 +49,16 @@ def load_all_results():
 
     return summary, predictions
 
+
 def select_models_to_plot(summary):
     """
-    Select naive baseline, best tree/classical baseline, and MLP.
+    Select the main models for detailed plots.
 
-    We explicitely include:
+    We include:
         - naive_spy_rv_5d
-        - random_forest if available
-        - mlp_64_32 if available
-    
-    If random_forest is missing, we choose the best non-naive, non-MLP model.
+        - random_forest
+        - mlp_64_32
+        - the EfficientKAN model
     """
     available_models = set(summary["model"].tolist())
 
@@ -57,25 +66,34 @@ def select_models_to_plot(summary):
 
     if "naive_spy_rv_5d" in available_models:
         selected_models.append("naive_spy_rv_5d")
-    
+
     if "random_forest" in available_models:
         selected_models.append("random_forest")
     else:
-        non_naive_non_mlp = summary[
+        non_naive_non_neural = summary[
             ~summary["model"].str.contains("naive", case=False)
             & ~summary["model"].str.contains("mlp", case=False)
+            & ~summary["model"].str.contains("kan", case=False)
         ].copy()
 
-        if not non_naive_non_mlp.empty:
-            best_classical = non_naive_non_mlp.sort_values("test_rmse").iloc[0][
+        if not non_naive_non_neural.empty:
+            best_classical = non_naive_non_neural.sort_values("test_rmse").iloc[0][
                 "model"
             ]
             selected_models.append(str(best_classical))
-    
+
     if "mlp_64_32" in available_models:
         selected_models.append("mlp_64_32")
-    
+
+    kan_models = summary[
+        summary["model"].str.contains("kan", case=False)
+    ].sort_values("test_rmse")
+
+    if not kan_models.empty:
+        selected_models.append(str(kan_models.iloc[0]["model"]))
+
     return selected_models
+
 
 def pivot_predictions(predictions):
     """
@@ -100,8 +118,9 @@ def pivot_predictions(predictions):
 
     data = true_values.merge(pred_wide, on="date", how="inner")
     data = data.sort_values("date")
- 
+
     return data
+
 
 def add_volatility_scale_columns(data):
     """
@@ -117,8 +136,9 @@ def add_volatility_scale_columns(data):
             continue
 
         data[f"{column}_vol"] = np.exp(data[column])
-    
+
     return data
+
 
 def make_safe_filename(name):
     return (
@@ -127,6 +147,7 @@ def make_safe_filename(name):
         .replace(" ", "_")
         .replace(":", "_")
     )
+
 
 def plot_metric_comparison(summary):
     """
@@ -139,7 +160,7 @@ def plot_metric_comparison(summary):
     x = np.arange(len(plot_data))
     width = 0.35
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(13, 6))
 
     plt.bar(
         x - width / 2,
@@ -170,6 +191,48 @@ def plot_metric_comparison(summary):
     print(f"Saved: {output_path}")
 
 
+def plot_mae_comparison(summary):
+    """
+    Plot validation/test MAE for all models.
+    """
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    plot_data = summary.sort_values("test_mae").copy()
+
+    x = np.arange(len(plot_data))
+    width = 0.35
+
+    plt.figure(figsize=(13, 6))
+
+    plt.bar(
+        x - width / 2,
+        plot_data["val_mae"],
+        width,
+        label="Validation MAE",
+    )
+
+    plt.bar(
+        x + width / 2,
+        plot_data["test_mae"],
+        width,
+        label="Test MAE",
+    )
+
+    plt.xticks(x, plot_data["model"], rotation=30, ha="right")
+    plt.title("Model MAE Comparison")
+    plt.xlabel("Model")
+    plt.ylabel("MAE on log future volatility")
+    plt.legend()
+    plt.grid(True, axis="y")
+    plt.tight_layout()
+
+    output_path = FIGURES_DIR / "all_models_mae_comparison.png"
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+    print(f"Saved: {output_path}")
+
+
 def plot_directional_accuracy_comparison(summary):
     """
     Plot validation/test directional accuracy for all models.
@@ -181,7 +244,7 @@ def plot_directional_accuracy_comparison(summary):
     x = np.arange(len(plot_data))
     width = 0.35
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(13, 6))
 
     plt.bar(
         x - width / 2,
@@ -192,7 +255,7 @@ def plot_directional_accuracy_comparison(summary):
 
     plt.bar(
         x + width / 2,
-        plot_data["val_directional_accuracy"],
+        plot_data["test_directional_accuracy"],
         width,
         label="Test directional accuracy",
     )
@@ -211,6 +274,7 @@ def plot_directional_accuracy_comparison(summary):
     plt.close()
 
     print(f"Saved: {output_path}")
+
 
 def plot_actual_vs_selected_predictions(data, selected_models):
     """
@@ -240,7 +304,7 @@ def plot_actual_vs_selected_predictions(data, selected_models):
             label=model_name,
             alpha=0.85,
         )
-    
+
     plt.title("Actual vs Predicted Future Realized Volatility")
     plt.xlabel("Date")
     plt.ylabel("Annualized volatility")
@@ -254,7 +318,8 @@ def plot_actual_vs_selected_predictions(data, selected_models):
 
     print(f"Saved: {output_path}")
 
-def plot_zoomed_actual_vs_selected_predictions(data, selected_models, last_n_days=25):
+
+def plot_zoomed_actual_vs_selected_predictions(data, selected_models, last_n_days=252):
     """
     Plot a zoomed comparison over the most recent test-set period.
     """
@@ -284,7 +349,7 @@ def plot_zoomed_actual_vs_selected_predictions(data, selected_models, last_n_day
             label=model_name,
             alpha=0.85,
         )
-    
+
     plt.title(f"Actual vs Predicted Volatility, Last {last_n_days} Test Days")
     plt.xlabel("Date")
     plt.ylabel("Annualized volatility")
@@ -297,6 +362,7 @@ def plot_zoomed_actual_vs_selected_predictions(data, selected_models, last_n_day
     plt.close()
 
     print(f"Saved: {output_path}")
+
 
 def plot_prediction_errors(predictions, selected_models):
     """
@@ -320,7 +386,7 @@ def plot_prediction_errors(predictions, selected_models):
             label=model_name,
             alpha=0.8,
         )
-    
+
     plt.axhline(0.0, linestyle="--", linewidth=1)
 
     plt.title("Prediction Errors Over Time")
@@ -336,6 +402,7 @@ def plot_prediction_errors(predictions, selected_models):
 
     print(f"Saved: {output_path}")
 
+
 def plot_actual_vs_predicted_scatter(predictions, selected_models):
     """
     Create actual-vs-predicted scatter plots for selected models.
@@ -348,7 +415,7 @@ def plot_actual_vs_predicted_scatter(predictions, selected_models):
     max_value = max(selected["y_true"].max(), selected["y_pred"].max())
 
     for model_name, group in selected.groupby("model"):
-        plt.figure(figsize=(7,7))
+        plt.figure(figsize=(7, 7))
 
         plt.scatter(
             group["y_true"],
@@ -381,9 +448,10 @@ def plot_actual_vs_predicted_scatter(predictions, selected_models):
 
         print(f"Saved: {output_path}")
 
+
 def save_combined_summary(summary):
     """
-    Save combined baseline + MLP metrics.
+    Save combined baseline + MLP + EfficientKAN metrics.
     """
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -392,6 +460,7 @@ def save_combined_summary(summary):
     summary.sort_values("test_rmse").to_csv(output_path, index=False)
 
     print(f"Saved: {output_path}")
+
 
 def main():
     print("Comparing all models so far")
@@ -405,9 +474,17 @@ def main():
     print(summary.sort_values("test_rmse").to_string(index=False))
     print()
 
+    print("Models ranked by test directional accuracy:")
+    print(
+        summary.sort_values("test_directional_accuracy", ascending=False).to_string(
+            index=False
+        )
+    )
+    print()
+
     print("Selected models for detailed plots:")
     for model_name in selected_models:
-        print(f" - {model_name}")
+        print(f"  - {model_name}")
     print()
 
     wide_predictions = pivot_predictions(predictions)
@@ -416,6 +493,7 @@ def main():
     save_combined_summary(summary)
 
     plot_metric_comparison(summary)
+    plot_mae_comparison(summary)
     plot_directional_accuracy_comparison(summary)
 
     plot_actual_vs_selected_predictions(
@@ -441,6 +519,7 @@ def main():
 
     print()
     print("Model comparison complete.")
+
 
 if __name__ == "__main__":
     main()
