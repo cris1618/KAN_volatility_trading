@@ -70,3 +70,77 @@ def compute_buy_and_hold_weights(
     Constant buy-and-hold SPY weight.
     """
     return pd.Series(weight, index=index, dtype=float)
+
+def smooth_weights(
+    raw_weights: pd.Series,
+    smoothing_alpha: float = 1.0,
+) -> pd.Series:
+    """
+    Smooth target weights through time.
+
+    If smoothing_alpha = 1.0, no smoothing is applied.
+
+    If smoothing_alpha = 0.25, the new target weight is:
+
+        smoothed_weight_t =
+            0.25 * raw_weight_t + 0.75 * smoothed_weight_{t-1}
+    
+    Lower alpha means smoother weights and lower turnover.
+    """
+    if not 0.0 < smoothing_alpha <= 1.0:
+        raise ValueError("smoothing_alpha must be in the interval (0, 1].")
+    
+    raw_weights = raw_weights.copy().astype(float)
+
+    smoothed = raw_weights.copy()
+
+    if len(smoothed) == 0:
+        return smoothed
+    
+    smoothed.iloc[0] = raw_weights.iloc[0]
+
+    for i in range(1, len(raw_weights)):
+        smoothed.iloc[i] = (
+            smoothing_alpha * raw_weights.iloc[i]
+            + (1.0 - smoothing_alpha) * smoothed.iloc[i-1]
+        )
+    
+    return smoothed
+
+def apply_rebalance_buffer(
+    target_weights: pd.Series,
+    rebalance_buffer: float = 0.0,
+) -> pd.Series:
+    """
+    Apply a no-trade buffer to target weights.
+
+    The portfolio only updates its target weight when the desired change is 
+    larger than rebalance_buffer. 
+
+    Example
+    -------
+    If rebalance_buffer = 0.05, then a change from 0.80 to 0.83 is ignored,
+    but a change from 0.80 to 0.90 is accepted.
+    """
+    if rebalance_buffer < 0.0:
+        raise ValueError("rebalance_buffer must be nonnegative.")
+    
+    target_weights = target_weights.copy().astype(float)
+
+    if rebalance_buffer == 0.0 or len(target_weights) == 0:
+        return target_weights
+    
+    buffered = target_weights.copy()
+    buffered.iloc[0] = target_weights.iloc[0]
+
+    current_weight = target_weights.iloc[0]
+
+    for i in range(1, len(target_weights)):
+        proposed_weight = target_weights.iloc[i]
+
+        if abs(proposed_weight - current_weight) > rebalance_buffer:
+            current_weight = proposed_weight
+        
+        buffered.iloc[i] = current_weight
+    
+    return buffered
